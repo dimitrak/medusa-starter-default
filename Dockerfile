@@ -1,28 +1,35 @@
-FROM node:20-alpine AS base
+# STAGE 1: Build the app
+FROM node:20-bullseye-slim AS builder
 
 WORKDIR /app
 
-# FIX 1: Install system tools required to build Medusa dependencies
-RUN apk add --no-cache python3 make g++ git
+# Install tools required for compiling Medusa dependencies (Python, C++, etc.)
+RUN apt-get update && apt-get install -y python3 make g++ git
 
 COPY package.json yarn.lock ./
 
-# FIX 2: Removed '--frozen-lockfile' so it can auto-correct dependency errors
+# Install all dependencies (including dev ones needed for building)
 RUN yarn install
 
 COPY . .
 
+# Build the Medusa application (creates .medusa/server folder)
 RUN yarn build
 
-FROM node:20-alpine
+# Install production-only dependencies INSIDE the build folder
+WORKDIR /app/.medusa/server
+RUN npm install --omit=dev
+
+# STAGE 2: Run the app
+FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Re-install simple production dependencies
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/package.json ./package.json
-COPY --from=base /app/.medusa/server ./build
+# Copy only the built application from the builder stage
+COPY --from=builder /app/.medusa/server /app
 
+# Expose port 9000
 EXPOSE 9000
 
-CMD ["yarn", "start"]
+# Medusa v2 production command
+CMD ["npm", "start"]
